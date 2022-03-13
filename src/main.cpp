@@ -1,188 +1,114 @@
-/*
- * Created on Tue Feb 18 2020
- *
- * Copyright (c) 2020 - Your Company
+/**
+ * @file  main.cpp
+ * @date  14.03.2022
+ * @author Daze
  */
+#include <header.h>
+char receiveByte;
+char receiveBuffer[4];
+int8_t receiveCnt;
 
-/* Pin layout
-        _________
-  RST - |       | - SCL
-  D2  - |       | - SDA
-  D3~ - |       | -  A1
-  VCC - |       | -  A0
-  GND - |       | - D13 (LED)
-  D5~ - |       | - D12
-  D6~ - |       | - D11
-  D7  - |       | - ~D9
-  GND - |       | - GND
-  RAW - |_______| - VCC
-
-  - 2 input for limmit switch (1)
-  - 2 input for limmit switch (2)
-  - 2 output for limmit motor (1)
-  - 2 output for limmit motor (2)
-  - 1 out pur for led
- */
-
-#include <Arduino.h>
-#include <main.h>
-
-void GPIO_Init(void);
-void Led_ON(void);
-void Led_OFF(void);
-void Led_blink(int times, int period);
-void Origin_search(void);
-void X_return(void);
-void Y_return(void);
-void X_move(int step, int direct);
-void Y_move(int step, int direct);
-char incomingByte;
-
-void setup() {
+void setup()
+{
   GPIO_Init();
-  Led_blink(20,100);
+  Led_blink(20, 100);
   Serial.begin(9600);
   Serial.println("Starting");
   Origin_search();
 }
 
-void loop() {
-  Led_OFF();
+void loop()
+{
+  Calculate_Timer();
+  Serial_Handle();
+  Motor_Operate();
+}
+
+void GPIO_Init(void)
+{
+  pinMode(X_DIRECT, OUTPUT);
+  pinMode(Y_DIRECT, OUTPUT);
+  pinMode(X_STEP, OUTPUT);
+  pinMode(Y_STEP, OUTPUT);
+
+  pinMode(X_HOME, INPUT);
+  pinMode(Y_HOME, INPUT);
+  pinMode(X_LIMIT, INPUT);
+  pinMode(Y_LIMIT, INPUT);
+
+  pinMode(LED_BUILTIN, OUTPUT);
+}
+
+void Serial_Handle(void)
+{
   if (Serial.available() > 0)
-  { 
-    Led_ON();
-    incomingByte = Serial.read();
+  {
+    Turn_On_LED();
+    receiveByte = Serial.read();
+    receiveBuffer[receiveCnt] = receiveByte;
+    receiveCnt++;
+    if(receiveCnt > 3)
+    {
+      receiveCnt = 0;
+    }
+
     Serial.print("Received: ");
-    Serial.println(incomingByte);
-
-    // if (incomingByte == 0x01)
-    // {
-    //   Serial.println("Done");
-    // }
-    // else{
-    //   Serial.println(incomingByte);
-    // }
-
-    switch(incomingByte){
-      case '1':
-        X_move(5,0);
-        break;
-      case '2':
-        X_move(5,1);
-        break;
-      case '3':
-        Y_move(5,0);
-        break;
-      case '4':
-        Y_move(5,1);
-        break;        
-      default:
-        break;
-    }
-  }
-  delay(10);
-}
-
-
-void GPIO_Init(void){
-  pinMode(D2, OUTPUT);
-  pinMode(D3, OUTPUT);
-  pinMode(D6, OUTPUT);
-  pinMode(D7, OUTPUT);
-  pinMode(D13,OUTPUT);
-  pinMode(D5, INPUT); 
-  pinMode(D9, INPUT); 
-  pinMode(D11,INPUT); 
-  pinMode(D12,INPUT); 
-
-}
-
-
-void Led_ON(){
-  digitalWrite(LED_BUILTIN,HIGH);
-} 
-void Led_OFF(){
-  digitalWrite(LED_BUILTIN,LOW);
-}
-
-void Led_blink(int times, int period){
-  int i = 0;
-  for (i=0; i < times; i++){
-    Led_ON();
-    delay(period);
-    Led_OFF();
-    delay(period);
+    Serial.println(receiveByte);
   }
 }
 
-void X_return(void)
+void Calculate_Timer()
 {
-  digitalWrite(X_STP,HIGH); delay(200);
-  digitalWrite(X_DIR,LOW);  delay(100);
+  static uint32_t start = micros();
+  yield();
+  if ((micros() - start) >= 1000)
+  {
 
-  while (digitalRead(X_HOME)==LOW){
-    digitalWrite(X_STP,LOW);
-    delay(50);
-    digitalWrite(X_STP,HIGH);
-    delay(50);
+    // start += 1000;
   }
 }
 
-void Y_return(void){
-  digitalWrite(Y_STP,HIGH); delay(200);
-  digitalWrite(Y_DIR,LOW);  delay(100);
-
-  while (digitalRead(Y_HOME)==LOW){
-    digitalWrite(Y_STP,LOW);
-    delay(50);
-    digitalWrite(Y_STP,HIGH);
-    delay(50);
-  }
-}
-
-void X_move(int step, int direct)
+void Motor_Operate()
 {
-  int i = 0;
-  digitalWrite(X_STP,HIGH);   delay(200);
-  digitalWrite(X_DIR,direct); delay(100);
-  
-  for (i=0; i < step; i++){
-    digitalWrite(X_STP,LOW);
-    delay(50);
-    digitalWrite(X_STP,HIGH);
-    delay(50);
-    if(digitalRead(X_HOME)==LOW || digitalRead(X_LIMIT)==LOW){
-      Serial.println("X limit switch was pressed");
-    }
+  char cmd = receiveBuffer[0];
+  int16_t data = (receiveBuffer[1] << 8) | receiveBuffer[2];
+  char checksum = receiveBuffer[3];
+
+  if (Calculate_Checsum(&receiveBuffer[0], 3) != checksum)
+  {
+    return;
   }
-  Serial.println("X moved");
-}
-
-void Y_move(int step, int direct)
-{
-  int i = 0;
-  digitalWrite(Y_STP,HIGH);   delay(200);
-  digitalWrite(Y_DIR,direct); delay(100);
-  
-  for (i=0; i < step; i++){
-    digitalWrite(Y_STP,LOW);
-    delay(50);
-    digitalWrite(Y_STP,HIGH);
-    delay(50);
-    if(digitalRead(Y_HOME)==LOW || digitalRead(Y_LIMIT)==LOW){
-      Serial.println("Y limit switch was pressed");
-    }
+  else
+  {
+    Serial.println(data);
   }
-  Serial.println("Y moved");
+
+  switch (cmd)
+  {
+  case '1':
+    Drive_X(5, 0);
+    break;
+  case '2':
+    Drive_X(5, 1);
+    break;
+  case '3':
+    Drive_Y(5, 0);
+    break;
+  case '4':
+    Drive_Y(5, 1);
+    break;
+  default:
+    break;
+  }
 }
 
-void Origin_search(void)
+char Calculate_Checsum(char *data, int8_t size)
 {
-  // X_return();  
-  X_move(20,HIGH);
-  // Y_return();  
-  Y_move(20,HIGH);
+  char checksum = 0;
+  for (int8_t i = 0; i < size; i++)
+  {
+    checksum = checksum ^ *data;
+    data++;
+  }
+  return checksum;
 }
-
-
-
